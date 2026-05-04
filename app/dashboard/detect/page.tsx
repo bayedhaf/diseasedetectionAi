@@ -39,6 +39,54 @@ interface TreatmentResult {
   };
 }
 
+type ApiDetectResult = {
+  label?: string;
+  displayName?: string;
+  crop?: string;
+  confidence?: number;
+  severity?: "none" | "low" | "medium" | "high" | "critical";
+  vitality?: number;
+  treatments?: string[];
+  prevention?: string;
+  isHealthy?: boolean;
+};
+
+function mapSeverity(severity?: ApiDetectResult["severity"]) {
+  switch (severity) {
+    case "critical":
+    case "high":
+      return "High";
+    case "medium":
+      return "Moderate";
+    case "low":
+      return "Low";
+    case "none":
+      return "Healthy";
+    default:
+      return "Low";
+  }
+}
+
+function toTreatmentResult(payload: any): TreatmentResult {
+  const apiResult: ApiDetectResult | undefined = payload?.result ?? payload;
+  const treatments = apiResult?.treatments ?? [];
+  const isHealthy = apiResult?.isHealthy || apiResult?.severity === "none";
+
+  return {
+    disease: isHealthy
+      ? "No disease detected"
+      : apiResult?.displayName || "Unknown",
+    confidence: apiResult?.confidence ?? 0,
+    severity: mapSeverity(apiResult?.severity),
+    recommendation: treatments[0] || "Follow recommended treatment plan",
+    treatment: {
+      chemical: treatments[0] || "No chemical treatment provided",
+      organic: treatments[1] || "No organic alternative provided",
+      prevention: apiResult?.prevention || "Maintain regular crop hygiene",
+    },
+  };
+}
+
 function getSeverityColor(severity: string) {
   switch (severity) {
     case "High": return "text-red-400 bg-red-500/10 border-red-500/20";
@@ -58,6 +106,47 @@ export default function DetectPage() {
   const [activeTab, setActiveTab] = useState<"treatment" | "prevention">("treatment");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [recentUploads, setRecentUploads] = useState<string[]>([]);
+  const diseaseClassDetails = [
+    {
+      name: "Bacterial Spot",
+      description:
+        "Small dark, water-soaked lesions on leaves and fruit, often with yellow halos. Caused by Xanthomonas bacteria.",
+    },
+    {
+      name: "Early Blight",
+      description:
+        "Dark brown concentric rings (target spots) on older leaves, starting from the bottom of the plant. Caused by Alternaria solani.",
+    },
+    {
+      name: "Healthy Leaf",
+      description:
+        "Normal green foliage with no visible symptoms, useful as a baseline or pass/fail check.",
+    },
+    {
+      name: "Late Blight",
+      description:
+        "Large, irregular olive-green to brown blotches on leaves with white fungal growth on the underside in wet conditions. Caused by Phytophthora infestans.",
+    },
+    {
+      name: "Molds",
+      description: "Powdery or fuzzy fungal growth visible on leaf surfaces.",
+    },
+    {
+      name: "Mosaic Virus",
+      description:
+        "Mottled light and dark green patches on leaves, often accompanied by leaf curling or stunted growth.",
+    },
+    {
+      name: "Septoria",
+      description:
+        "Small circular spots with dark borders and grayish centers on leaves, often with tiny black fungal fruiting bodies. Caused by Septoria lycopersici.",
+    },
+    {
+      name: "Yellow Curl Virus",
+      description:
+        "Upward leaf curling, yellowing of leaf edges, and stunted shoot growth.",
+    },
+  ];
 
   // ── File handling ────────────────────────────────────────────────────────────
   const handleFile = useCallback(async (file: File) => {
@@ -84,7 +173,7 @@ export default function DetectPage() {
         if (!res.ok) {
           throw new Error(data.error || "Detection failed");
         }
-        setResult(data);
+        setResult(toTreatmentResult(data));
         setStage("done");
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Unknown error");
@@ -329,6 +418,38 @@ export default function DetectPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-5">
+            <div className="rounded-xl border border-[#41493e] bg-[#131313] p-4 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-xs tracking-widest uppercase text-[#8a9386]">Dataset</p>
+                  <p className="text-sm font-semibold text-[#e5e2e1] mt-1">Plant Disease Finder</p>
+                </div>
+                <div className="text-right text-[11px] text-[#8a9386]">
+                  <p>Object detection</p>
+                  <p>2,307 images</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[11px] text-[#8a9386] mb-3">
+                <div className="flex items-center gap-2">
+                  <Leaf size={12} className="text-[#91d78a]" />
+                  8 classes
+                </div>
+                <div className="flex items-center gap-2">
+                  <Grid3x3 size={12} className="text-[#91d78a]" />
+                  Leaf-focused labels
+                </div>
+              </div>
+              <div className="space-y-2">
+                {diseaseClassDetails.map((item) => (
+                  <div key={item.name} className="rounded-lg border border-[#2a2f2a] bg-[#161616] p-2">
+                    <p className="text-xs font-semibold text-[#c0c9bb]">{item.name}</p>
+                    <p className="text-[11px] text-[#8a9386] mt-1 leading-relaxed">
+                      {item.description}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
             {/* Loading skeleton */}
             {stage === "scanning" && (
               <div className="space-y-4">

@@ -51,6 +51,15 @@ type ApiDetectResult = {
   isHealthy?: boolean;
 };
 
+type RecentDiagnosis = {
+  id: number;
+  crop: string;
+  disease: string;
+  date: string;
+  confidence: number;
+  status: "healthy" | "low" | "medium" | "high" | "critical";
+};
+
 function mapSeverity(severity?: ApiDetectResult["severity"]) {
   switch (severity) {
     case "critical":
@@ -71,12 +80,13 @@ function toTreatmentResult(payload: any): TreatmentResult {
   const apiResult: ApiDetectResult | undefined = payload?.result ?? payload;
   const treatments = apiResult?.treatments ?? [];
   const isHealthy = apiResult?.isHealthy || apiResult?.severity === "none";
+  const confidenceRaw = apiResult?.confidence ?? 0;
+  const confidence = Math.round(confidenceRaw <= 1 ? confidenceRaw * 100 : confidenceRaw);
+  const diseaseName = apiResult?.displayName || apiResult?.label || "Unknown";
 
   return {
-    disease: isHealthy
-      ? "No disease detected"
-      : apiResult?.displayName || "Unknown",
-    confidence: apiResult?.confidence ?? 0,
+    disease: isHealthy ? "No disease detected" : diseaseName,
+    confidence,
     severity: mapSeverity(apiResult?.severity),
     recommendation: treatments[0] || "Follow recommended treatment plan",
     treatment: {
@@ -85,6 +95,35 @@ function toTreatmentResult(payload: any): TreatmentResult {
       prevention: apiResult?.prevention || "Maintain regular crop hygiene",
     },
   };
+}
+
+function toStatus(severity?: ApiDetectResult["severity"]): RecentDiagnosis["status"] {
+  switch (severity) {
+    case "critical":
+      return "critical";
+    case "high":
+      return "high";
+    case "medium":
+      return "medium";
+    case "low":
+      return "low";
+    case "none":
+    default:
+      return "healthy";
+  }
+}
+
+function saveRecentDiagnosis(record: RecentDiagnosis) {
+  if (typeof window === "undefined") return;
+  try {
+    const key = "agritech_recent_diagnoses";
+    const existing = localStorage.getItem(key);
+    const items = existing ? (JSON.parse(existing) as RecentDiagnosis[]) : [];
+    const next = [record, ...items].slice(0, 10);
+    localStorage.setItem(key, JSON.stringify(next));
+  } catch {
+    // Ignore storage errors
+  }
 }
 
 function getSeverityColor(severity: string) {
@@ -169,11 +208,25 @@ export default function DetectPage() {
           body: formData,
         });
         const data = await res.json();
+        console.log("[detect] /api/detect response", data);
 
         if (!res.ok) {
           throw new Error(data.error || "Detection failed");
         }
         setResult(toTreatmentResult(data));
+        const apiResult: ApiDetectResult | undefined = data?.result ?? data;
+        const confidenceRaw = apiResult?.confidence ?? 0;
+        const confidence = Math.round(confidenceRaw <= 1 ? confidenceRaw * 100 : confidenceRaw);
+        const isHealthy = apiResult?.isHealthy || apiResult?.severity === "none";
+        const diseaseName = apiResult?.displayName || apiResult?.label || "Unknown";
+        saveRecentDiagnosis({
+          id: Date.now(),
+          crop: apiResult?.crop || "Plant",
+          disease: isHealthy ? "No disease detected" : diseaseName,
+          date: new Date().toISOString().slice(0, 10),
+          confidence,
+          status: toStatus(apiResult?.severity),
+        });
         setStage("done");
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Unknown error");
@@ -205,7 +258,7 @@ export default function DetectPage() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-[calc(100vh-120px)]">
+    <div className="flex flex-col md:h-[calc(100vh-120px)]">
       {/* Page Header */}
       <div className="mb-6">
         <h1
@@ -222,20 +275,20 @@ export default function DetectPage() {
         </p>
       </div>
 
-      <div className="flex gap-6 flex-1 min-h-0">
+      <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0">
         {/* ── Left column: image panel ── */}
         <div className="flex-1 flex flex-col gap-5 min-w-0">
           {/* Action buttons */}
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all bg-[#1c1b1b] border border-[#41493e] text-[#c0c9bb] hover:border-[#91d78a]/40 hover:text-[#91d78a]"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all bg-[#1c1b1b] border border-[#41493e] text-[#c0c9bb] hover:border-[#91d78a]/40 hover:text-[#91d78a] w-full sm:w-auto"
             >
               <Upload size={15} />
               Upload Image
             </button>
             <button
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all bg-[#1b5e20] text-white hover:bg-[#2e7d32]"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all bg-[#1b5e20] text-white hover:bg-[#2e7d32] w-full sm:w-auto"
             >
               <Camera size={15} />
               Take Photo
@@ -381,7 +434,7 @@ export default function DetectPage() {
               <p className="text-[10px] tracking-widest uppercase mb-3 text-[#8a9386]">
                 Recent Uploads
               </p>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 {recentUploads.map((url, i) => (
                   <button
                     key={i}
@@ -407,7 +460,7 @@ export default function DetectPage() {
         </div>
 
         {/* ── Right column: results panel ── */}
-        <div className="w-[380px] shrink-0 flex flex-col bg-[#1c1b1b] border border-[#41493e] rounded-xl overflow-hidden">
+        <div className="w-full lg:w-[380px] shrink-0 flex flex-col bg-[#1c1b1b] border border-[#41493e] rounded-xl overflow-hidden">
           <div className="px-5 py-4 border-b border-[#41493e]">
             <h2
               className="text-base font-bold text-[#e5e2e1]"

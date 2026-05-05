@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,25 +40,50 @@ function StatCard({ title, value, change, icon: Icon, color }: any) {
   );
 }
 
-export default function OverviewPage() {
-  const [recentUploads] = useState([
-    { id: 1, crop: "Tomato", disease: "Early Blight", date: "2026-05-03", confidence: 94, status: "treated" },
-    { id: 2, crop: "Maize", disease: "Northern Leaf Blight", date: "2026-05-01", confidence: 87, status: "pending" },
-    { id: 3, crop: "Potato", disease: "Late Blight", date: "2026-04-28", confidence: 96, status: "treated" },
-  ]);
+type RecentDiagnosis = {
+  id: number;
+  crop: string;
+  disease: string;
+  date: string;
+  confidence: number;
+  status: "healthy" | "low" | "medium" | "high" | "critical";
+};
 
-  const getStatusColor = (status: string) => {
+export default function OverviewPage() {
+  const [recentUploads, setRecentUploads] = useState<RecentDiagnosis[]>([]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = localStorage.getItem("agritech_recent_diagnoses");
+      const items = stored ? (JSON.parse(stored) as RecentDiagnosis[]) : [];
+      setRecentUploads(items);
+    } catch {
+      setRecentUploads([]);
+    }
+  }, []);
+
+  const getStatusColor = (status: RecentDiagnosis["status"]) => {
     switch (status) {
-      case "treated": return "text-green-400 bg-green-500/10 border-green-500/20";
-      case "pending": return "text-yellow-400 bg-yellow-500/10 border-yellow-500/20";
-      default: return "text-gray-400 bg-gray-500/10";
+      case "healthy":
+        return "text-green-400 bg-green-500/10 border-green-500/20";
+      case "low":
+        return "text-yellow-400 bg-yellow-500/10 border-yellow-500/20";
+      case "medium":
+        return "text-orange-400 bg-orange-500/10 border-orange-500/20";
+      case "high":
+        return "text-red-400 bg-red-500/10 border-red-500/20";
+      case "critical":
+        return "text-red-400 bg-red-500/15 border-red-500/30";
+      default:
+        return "text-gray-400 bg-gray-500/10";
     }
   };
 
   return (
     <div className="space-y-6">
       {/* Quick Actions */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Link href="/dashboard/detect">
           <div className="bg-[#1c1b1b] border border-[#41493e] rounded-xl p-4 text-center hover:border-[#91d78a]/40 hover:bg-[#201f1f] transition-all cursor-pointer">
             <div className="w-10 h-10 rounded-lg bg-[#1b5e20] mx-auto mb-2 flex items-center justify-center">
@@ -93,7 +118,7 @@ export default function OverviewPage() {
 
       {/* Recent Diagnoses */}
       <div className="bg-[#1c1b1b] border border-[#41493e] rounded-xl">
-        <div className="flex items-center justify-between p-5 border-b border-[#41493e]">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-5 border-b border-[#41493e]">
           <div>
             <h3 className="text-lg font-semibold text-[#e5e2e1]">Recent Diagnoses</h3>
             <p className="text-sm text-[#8a9386]">Your last AI crop analyses</p>
@@ -108,27 +133,34 @@ export default function OverviewPage() {
           <table className="w-full text-[#c0c9bb]">
             <thead className="border-b border-[#41493e] bg-[#151515]">
               <tr className="text-left text-xs text-[#8a9386]">
-                <th className="px-5 py-3 font-medium">Crop</th>
-                <th className="px-5 py-3 font-medium">Disease</th>
-                <th className="px-5 py-3 font-medium">Date</th>
-                <th className="px-5 py-3 font-medium">Confidence</th>
-                <th className="px-5 py-3 font-medium">Status</th>
-                <th className="px-5 py-3 font-medium"></th>
+                <th className="px-3 sm:px-5 py-3 font-medium">Crop</th>
+                <th className="px-3 sm:px-5 py-3 font-medium">Disease</th>
+                <th className="px-3 sm:px-5 py-3 font-medium hidden md:table-cell">Date</th>
+                <th className="px-3 sm:px-5 py-3 font-medium hidden md:table-cell">Confidence</th>
+                <th className="px-3 sm:px-5 py-3 font-medium">Status</th>
+                <th className="px-3 sm:px-5 py-3 font-medium"></th>
               </tr>
             </thead>
             <tbody>
+              {recentUploads.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-5 py-6 text-center text-sm text-[#8a9386]">
+                    No scans yet. Run a diagnosis to see results here.
+                  </td>
+                </tr>
+              )}
               {recentUploads.map((d) => (
                 <tr key={d.id} className="border-b border-[#41493e] hover:bg-[#201f1f] transition-colors">
-                  <td className="px-5 py-3 text-sm text-[#c0c9bb]">{d.crop}</td>
-                  <td className="px-5 py-3 text-sm text-[#e5e2e1]">{d.disease}</td>
-                  <td className="px-5 py-3 text-sm text-[#8a9386]">{d.date}</td>
-                  <td className="px-5 py-3 text-sm text-[#91d78a]">{d.confidence}%</td>
-                  <td className="px-5 py-3">
+                  <td className="px-3 sm:px-5 py-3 text-sm text-[#c0c9bb]">{d.crop}</td>
+                  <td className="px-3 sm:px-5 py-3 text-sm text-[#e5e2e1]">{d.disease}</td>
+                  <td className="px-3 sm:px-5 py-3 text-sm text-[#8a9386] hidden md:table-cell">{d.date}</td>
+                  <td className="px-3 sm:px-5 py-3 text-sm text-[#91d78a] hidden md:table-cell">{d.confidence}%</td>
+                  <td className="px-3 sm:px-5 py-3">
                     <span className={cn("text-xs px-2 py-1 rounded-full border", getStatusColor(d.status))}>
                       {d.status}
                     </span>
                   </td>
-                  <td className="px-5 py-3">
+                  <td className="px-3 sm:px-5 py-3">
                     <button className="text-[#8a9386] hover:text-[#91d78a]">
                       <Eye className="w-4 h-4" />
                     </button>
@@ -142,7 +174,7 @@ export default function OverviewPage() {
 
       {/* Recommended Products */}
       <div className="bg-[#1c1b1b] border border-[#41493e] rounded-xl">
-        <div className="flex items-center justify-between p-5 border-b border-[#41493e]">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-5 border-b border-[#41493e]">
           <div>
             <h3 className="text-lg font-semibold text-[#e5e2e1]">Recommended for You</h3>
             <p className="text-sm text-[#8a9386]">Based on your recent diagnoses</p>
@@ -159,7 +191,7 @@ export default function OverviewPage() {
             { name: "Hybrid Maize Seed", price: "850 ETB", seller: "EthioSeed", rating: 4.9 },
             { name: "Organic Neem Oil", price: "320 ETB", seller: "GreenFarm", rating: 4.7 },
           ].map((p) => (
-            <div key={p.name} className="flex items-center gap-4 p-3 rounded-lg bg-[#131313] border border-[#41493e] hover:border-[#91d78a]/30 transition-all">
+            <div key={p.name} className="flex flex-col sm:flex-row sm:items-center gap-4 p-3 rounded-lg bg-[#131313] border border-[#41493e] hover:border-[#91d78a]/30 transition-all">
               <div className="w-12 h-12 rounded-lg bg-[#1b5e20]/20 border border-[#91d78a]/20 flex items-center justify-center">
                 <Package className="w-6 h-6 text-[#91d78a]" />
               </div>

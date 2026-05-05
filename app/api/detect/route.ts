@@ -234,7 +234,12 @@ async function detectWithRoboflow(imageBase64: string): Promise<{
 }> {
   const apiKey = process.env.ROBOFLOW_API_KEY;
   const modelId = process.env.ROBOFLOW_MODEL_ID || "plant-disease-detection/1";
-  const apiUrl = `https://detect.roboflow.com/${modelId}?api_key=${apiKey}`;
+  const params = new URLSearchParams({
+    api_key: apiKey || "",
+    confidence: "0.2",
+    overlap: "0.3",
+  });
+  const apiUrl = `https://detect.roboflow.com/${modelId}?${params.toString()}`;
 
   const response = await fetch(apiUrl, {
     method: "POST",
@@ -258,18 +263,91 @@ async function detectWithRoboflow(imageBase64: string): Promise<{
     throw new Error(`Roboflow API error ${response.status}: ${rawText}`);
   }
 
+  const predictionCount = Array.isArray(data?.predictions)
+    ? data.predictions.length
+    : typeof data?.predictions === "object" && data?.predictions
+      ? Object.keys(data.predictions).length
+      : 0;
+
+  let topPrediction: { class: string; confidence: number } | null = null;
+
   // Roboflow detection response shape:
   // { predictions: [{ class: "Label", confidence: 0.92, ... }], image: {...} }
-  const topPrediction = Array.isArray(data?.predictions)
-    ? data.predictions.sort((a: { confidence: number }, b: { confidence: number }) => b.confidence - a.confidence)[0]
-    : null;
+  if (Array.isArray(data?.predictions) && data.predictions.length > 0) {
+    topPrediction = data.predictions
+      .sort((a: { confidence: number }, b: { confidence: number }) => b.confidence - a.confidence)[0];
+  } else if (data?.predictions && typeof data.predictions === "object") {
+    const entries = Object.entries(data.predictions)
+      .filter(([, value]) => typeof value === "number") as Array<[string, number]>;
+    if (entries.length > 0) {
+      const [label, confidence] = entries.sort((a, b) => b[1] - a[1])[0];
+      topPrediction = { class: label, confidence };
+    }
+  }
+
+  console.log("[/api/detect] Roboflow response keys:", Object.keys(data ?? {}));
+  console.log("[/api/detect] Predictions:", predictionCount, topPrediction?.class, topPrediction?.confidence);
+  if (!topPrediction) {
+    console.log("[/api/detect] Empty predictions payload:", data?.predictions);
+  }
 
   if (!topPrediction) {
     return { label: null, confidence: 0, rawResponse: data };
   }
 
   const label = topPrediction.class as string;
-  const confidence = Math.round(topPrediction.confidence * 100);
+  const confidenceRaw = topPrediction.confidence as number;
+  const confidence = Math.round(confidenceRaw <= 1 ? confidenceRaw * 100 : confidenceRaw);
+
+  return { label, confidence, rawResponse: data };
+}
+
+async function classifyWithRoboflow(imageBase64: string): Promise<{
+  label: string | null;
+  confidence: number;
+  rawResponse: unknown;
+}> {
+  const apiKey = process.env.ROBOFLOW_API_KEY;
+  const modelId = process.env.ROBOFLOW_MODEL_ID || "plant-disease-detection/1";
+  const params = new URLSearchParams({
+    api_key: apiKey || "",
+  });
+  const apiUrl = `https://classify.roboflow.com/${modelId}?${params.toString()}`;
+
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: imageBase64,
+  });
+
+  const rawText = await response.text();
+  let data: any = null;
+
+  try {
+    data = rawText ? JSON.parse(rawText) : null;
+  } catch (parseError) {
+    const preview = rawText?.slice(0, 200) || "<empty>";
+    throw new Error(`Roboflow classify returned non-JSON response: ${preview}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(`Roboflow classify error ${response.status}: ${rawText}`);
+  }
+
+  const predictionList = Array.isArray(data?.predictions) ? data.predictions : [];
+  const topPrediction = predictionList
+    .sort((a: { confidence: number }, b: { confidence: number }) => b.confidence - a.confidence)[0];
+
+  if (!topPrediction) {
+    console.log("[/api/detect] Classify predictions empty:", data?.predictions);
+    return { label: null, confidence: 0, rawResponse: data };
+  }
+
+  const label = topPrediction.class as string;
+  const confidenceRaw = topPrediction.confidence as number;
+  const confidence = Math.round(confidenceRaw <= 1 ? confidenceRaw * 100 : confidenceRaw);
 
   return { label, confidence, rawResponse: data };
 }
@@ -309,7 +387,16 @@ export async function POST(req: NextRequest) {
     // Strip data URL prefix — Roboflow expects raw base64
     const base64Data = imageDataUrl.replace(/^data:image\/\w+;base64,/, "");
 
-    const { label, confidence } = await detectWithRoboflow(base64Data);
+    const detection = await detectWithRoboflow(base64Data);
+    let label = detection.label;
+    let confidence = detection.confidence;
+
+    if (!label) {
+      console.log("[/api/detect] Falling back to classify endpoint");
+      const classification = await classifyWithRoboflow(base64Data);
+      label = classification.label;
+      confidence = classification.confidence;
+    }
 
     if (!label) {
       return NextResponse.json({
